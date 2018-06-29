@@ -10,11 +10,23 @@ from typing import Dict
 
 import requests
 
-from committelemetry import config
-from committelemetry.classifier import determine_review_system
-from committelemetry.hgmo import fetch_changeset, utc_hgwebdate
+from committelemetry import config, patch
+from committelemetry.classifier import determine_review_system, has_merge_markers
+from committelemetry.hgmo import fetch_changeset, fetch_raw_diff_for_changeset, \
+    utc_hgwebdate
 
 log = logging.getLogger(__name__)
+
+
+def diffstat_for_changeset(changesetid: str) -> Dict:
+    # Fetch the raw diff produced by 'hg export'.
+    raw_diff = fetch_raw_diff_for_changeset(changesetid)
+    diffstat = patch.diffstat(raw_diff)
+    return {
+        'changedFiles': diffstat.files_changed,
+        'additions': diffstat.additions,
+        'deletions': diffstat.deletions,
+    }
 
 
 def payload_for_changeset(changesetid: str, repo_url: str) -> Dict:
@@ -40,8 +52,15 @@ def payload_for_changeset(changesetid: str, repo_url: str) -> Dict:
     landingsystem = changeset.get('landingsystem')
     utc_pushdate = utc_hgwebdate(changeset['pushdate'])
 
+    # Only compute diffstats for non-merge commits.
+    if has_merge_markers(changeset):
+        diffstat = None
+    else:
+        diffstat = diffstat_for_changeset(changesetid)
+
     return {
         'changesetID': changesetid,
+        'diffstat': diffstat,
         'landingSystem': landingsystem,
         'reviewSystemUsed': reviewsystem.value,
         'repository': repo_url,
